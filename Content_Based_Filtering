@@ -1,0 +1,100 @@
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes.models import (
+    SearchIndex,
+    SimpleField,
+    SearchFieldDataType,
+    SearchableField,
+    VectorSearch,
+    HnswAlgorithmConfiguration
+)
+import os
+
+# Set up Azure AI Search
+endpoint = "https://your-search-service.search.windows.net"
+key = os.environ["AZURE_SEARCH_KEY"]
+index_name = "artworks"
+
+# Create index client
+index_client = SearchIndexClient(endpoint=endpoint, credential=AzureKeyCredential(key))
+
+# Define the index schema
+index = SearchIndex(
+    name=index_name,
+    fields=[
+        SimpleField(name="id", type=SearchFieldDataType.String, key=True),
+        SearchableField(name="title", type=SearchFieldDataType.String),
+        SearchableField(name="artist", type=SearchFieldDataType.String),
+        SearchableField(name="description", type=SearchFieldDataType.String),
+        SimpleField(name="year", type=SearchFieldDataType.Int32),
+        SearchableField(name="style", type=SearchFieldDataType.String),
+        SearchableField(name="medium", type=SearchFieldDataType.String),
+        SearchableField(name="themes", type=SearchFieldDataType.Collection(SearchFieldDataType.String)),
+        SimpleField(name="vector_embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), 
+                    vector_search_dimensions=1536, vector_search_profile_name="artwork-vector-config"),
+    ],
+    vector_search=VectorSearch(
+        algorithms=[
+            HnswAlgorithmConfiguration(
+                name="artwork-vector-algorithm",
+                parameters={
+                    "m": 4,
+                    "efConstruction": 400,
+                    "efSearch": 500
+                }
+            )
+        ]
+    )
+)
+
+# Create or update the index
+index_client.create_or_update_index(index)
+
+# Create search client for uploading data
+search_client = SearchClient(endpoint=endpoint, index_name=index_name, credential=AzureKeyCredential(key))
+
+# Function to get similar artworks based on vector similarity
+def get_similar_artworks(artwork_id, top_k=5):
+    # First retrieve the artwork to get its embedding
+    artwork = search_client.get_document(artwork_id)
+    embedding = artwork["vector_embedding"]
+    
+    # Then search for similar artworks using vector similarity
+    results = search_client.search(
+        search_text=None,  # No text search
+        vector=embedding,  # Use the embedding for similarity search
+        top=top_k,
+        vector_fields="vector_embedding",
+        select=["id", "title", "artist", "year", "style", "medium"]
+    )
+    
+    similar_artworks = [doc for doc in results]
+    return similar_artworks
+
+# Function to search by style, medium, themes, etc.
+def search_artworks_by_attributes(style=None, medium=None, themes=None, artist=None, year_range=None, top_k=20):
+    filters = []
+    
+    if style:
+        filters.append(f"style eq '{style}'")
+    if medium:
+        filters.append(f"medium eq '{medium}'")
+    if artist:
+        filters.append(f"artist eq '{artist}'")
+    if themes:
+        theme_filters = [f"themes/any(t: t eq '{theme}')" for theme in themes]
+        filters.append(" or ".join(theme_filters))
+    if year_range:
+        filters.append(f"year ge {year_range[0]} and year le {year_range[1]}")
+    
+    filter_expression = " and ".join(filters) if filters else None
+    
+    results = search_client.search(
+        search_text="*",
+        filter=filter_expression,
+        top=top_k,
+        select=["id", "title", "artist", "year", "style", "medium"]
+    )
+    
+    return [doc for doc in results]
