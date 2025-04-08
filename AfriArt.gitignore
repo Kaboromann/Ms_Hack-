@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+venv/
+ENV/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# Azure ML
+.azureml/
+config.json
+
+# Model files (if they're too large)
+# Uncomment if your model is over GitHub's file size limit
+# model/*.pkl
